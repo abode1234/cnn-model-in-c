@@ -1,97 +1,171 @@
-// hader structure
-
+// cnn.h
 #ifndef CNN_H
 #define CNN_H
 
- // layer type
+#include <stdio.h>
+#include <stdlib.h>
 
-typedef enum _LayerType {
-    Input = 0,
-    Hidden,
-    Output
+// Activation function type
+typedef enum {
+    ACTIVATION_NONE = 0,
+    ACTIVATION_RELU,
+    ACTIVATION_SIGMOID,
+    ACTIVATION_TANH,
+    ACTIVATION_SOFTMAX
+} ActivationType;
+
+// Padding type
+typedef enum {
+    PADDING_VALID = 0, // No padding
+    PADDING_SAME       // Zero-padding to maintain input size
+} PaddingType;
+
+// Layer type
+typedef enum {
+    LAYER_INPUT = 0,
+    LAYER_CONVOLUTIONAL,
+    LAYER_POOLING,
+    LAYER_FULLY_CONNECTED,
+    LAYER_BATCH_NORM,
+    LAYER_DROPOUT,
+    LAYER_OUTPUT
 } LayerType;
 
+// Pooling type (for pooling layers)
+typedef enum {
+    POOLING_MAX = 0,
+    POOLING_AVERAGE
+} PoolingType;
 
-// layer structure
+// Tensor shape (generalized for inputs, outputs, weights, etc.)
+typedef struct {
+    int batch;  // Batch size
+    int depth;  // Number of channels (or filters for conv)
+    int height; // Height of feature map
+    int width;  // Width of feature map
+} TensorShape;
 
-typedef struct _Layer{
+// Tensor data (stores actual values)
+typedef struct {
+    TensorShape shape;
+    double *data; // Flattened array of values
+} Tensor;
 
-    // Layer position
-    int id;
-    struct _Layer *lprev;
-    struct _Layer *lnext;
+// Layer-specific configuration (union for different layer types)
+typedef union {
+    // Convolutional layer
+    struct {
+        int kernel_size;  // Kernel size (square)
+        int stride;       // Stride
+        PaddingType padding; // Padding mode
+        int num_filters;  // Number of output filters
+    } conv;
 
-    // shape
-    int depth, height, width; 
-    
-    // Network Neuron
-    int nNodes; // number of Neurons
-    float *output; // output value (trained)
-    float *Gradients; // Gradients value (trained)
-    float *error; // error value (trained)
-    
-    // biases 
-    int nBias; // number of bias 
-    float *bias; // bias value (trained)
-    float *u_bias // bias update value
-    
-    // weights
-    int nWeights; // number of weights
-    float *weights; // weights value (trained)
-    float *u_weights; // weights update value
-    
-    LayerType ltype;
-    
-    union {
-        // full connection dense
-        struct {}full;
-        
-        // convolutional
-        struct {
-            int ksize; // kernel size
-            int stride; // stride
-            int padding; // padding
-        }conv;
+    // Pooling layer
+    struct {
+        int kernel_size;  // Pooling window size
+        int stride;       // Stride
+        PoolingType pool_type; // Max or average pooling
+    } pool;
 
-    }; 
+    // Fully connected layer
+    struct {
+        int num_neurons; // Number of neurons in the layer
+    } fc;
 
-} Layer;
+    // Batch normalization
+    struct {
+        double epsilon; // Small value for numerical stability
+        double *gamma;   // Scale parameter
+        double *beta;    // Shift parameter
+        double *mean;    // Running mean
+        double *variance; // Running variance
+    } batch_norm;
 
-// create input layer structure (depth, height, width)
-Layer *createInputLayer(int depth, int height, int width);
+    // Dropout
+    struct {
+        double dropout_rate; // Probability of dropping a neuron
+    } dropout;
+} LayerConfig;
 
-// create hidden layer full (lprev, nNodes , std)
-Layer *createHiddenLayer(Layer *lprev, int nNodes, float std);
+// Forward declaration of Layer
+typedef struct Layer Layer;
 
-// create convolutional layer (lprev,depth, height, width, ksize, stride, padding, std) 
-Layer *createConvolutionalLayer(Layer *lprev, int depth, int height, int width, int ksize, int stride, int padding, float std); 
+// Layer structure
+struct Layer {
+    // Layer metadata
+    int id;              // Unique layer ID
+    LayerType type;      // Type of layer
+    const char *name;    // Optional layer name for debugging
 
-// Layer free Release
-void freeLayer(Layer *l);
+    // Layer connectivity
+    Layer *prev;         // Previous layer
+    Layer *next;         // Next layer
 
-// Layer dump show debug output
-void dumpLayer(Layer *l, FILE *fp);
+    // Input and output tensors
+    Tensor input;        // Input tensor
+    Tensor output;       // Output tensor
 
-// Layer set_inpute set input value
+    // Parameters (weights, biases, etc.)
+    Tensor weights;      // Weights (if applicable)
+    Tensor biases;       // Biases (if applicable)
+    Tensor weight_grads; // Gradients for weights
+    Tensor bias_grads;   // Gradients for biases
 
-void setInput(Layer *l, float *input);
+    // Activation function
+    ActivationType activation;
 
-void Layer_getOutputs(const Layer* l, double* outputs);
+    // Layer-specific configuration
+    LayerConfig config;
 
-/* Layer_getErrorTotal(self)
-   Gets the error total.
-*/
-double Layer_getErrorTotal(const Layer* l);
+    // Function pointers for layer operations
+    void (*forward)(Layer *self);           // Forward pass
+    void (*backward)(Layer *self);          // Backward pass
+    void (*update)(Layer *self, double learning_rate); // Update parameters
 
-/* Layer_learnOutputs(self, values)
-   Learns the output values.
-*/
-void Layer_learnOutputs(Layer* l, const double* values);
+    // Debugging and serialization
+    void (*dump)(const Layer *self, FILE *fp); // Debug output
+    void (*save)(const Layer *self, FILE *fp); // Save layer to file
+    void (*load)(Layer *self, FILE *fp);       // Load layer from file
+};
 
-/* Layer_update(self, rate)
-   Updates the weights.
-*/
-void Layer_update(Layer* l, double rate);
+// Function declarations
 
+// Create layers
+Layer *create_input_layer(int batch, int depth, int height, int width);
+Layer *create_convolutional_layer(const Layer *prev, int num_filters, int kernel_size, 
+                                 int stride, PaddingType padding, ActivationType activation);
+Layer *create_pooling_layer(const Layer *prev, int kernel_size, int stride, 
+                           PoolingType pool_type);
+Layer *create_fully_connected_layer(const Layer *prev, int num_neurons, 
+                                   ActivationType activation);
+Layer *create_batch_norm_layer(const Layer *prev, double epsilon);
+Layer *create_dropout_layer(const Layer *prev, double dropout_rate);
+Layer *create_output_layer(const Layer *prev, int num_classes, ActivationType activation);
+
+// Free layer memory
+void free_layer(Layer *layer);
+
+// Set input data
+void set_input(Layer *layer, const double *data);
+
+// Get output data
+void get_output(const Layer *layer, double *output);
+
+// Forward pass for the entire network
+void forward_network(Layer *input_layer);
+
+// Backward pass for the entire network
+void backward_network(Layer *output_layer, const double *targets);
+
+// Update parameters for the entire network
+void update_network(Layer *input_layer, double learning_rate);
+
+// Compute total error
+double get_total_error(const Layer *output_layer, const double *targets);
+
+// Save and load network
+void save_network(const Layer *input_layer, const char *filename);
+void load_network(Layer *input_layer, const char *filename);
 
 #endif
